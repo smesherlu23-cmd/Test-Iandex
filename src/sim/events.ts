@@ -22,7 +22,13 @@ export type BattleEventBody =
   | { type: 'hero_parry'; source: string }
   | { type: 'hero_block'; source: string; damage: number }
   | { type: 'hero_second_wind'; hp: number }
+  | { type: 'hero_status'; source: string; slow: number; root: number }
   | { type: 'hero_died'; x: number; y: number }
+  | { type: 'minion_spawn'; id: number; source: string; x: number; y: number }
+  | { type: 'minion_hit'; id: number; damage: number }
+  | { type: 'minion_gone'; id: number }
+  | { type: 'cover_destroyed'; cover: number }
+  | { type: 'boss_haste'; until: number; factor: number }
   | { type: 'boss_hit'; damage: number; total: number }
   | { type: 'battle_end'; outcome: BattleOutcome; duration: number };
 

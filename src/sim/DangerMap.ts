@@ -69,6 +69,26 @@ export class DangerMap {
     }
   }
 
+  rect(x: number, y: number, w: number, h: number, value: number): void {
+    if (value <= 0) return;
+    const i0 = Math.max(0, Math.floor(x - 0.5));
+    const i1 = Math.min(this.w - 1, Math.floor(x + w + 0.5));
+    const j0 = Math.max(0, Math.floor(y - 0.5));
+    const j1 = Math.min(this.h - 1, Math.floor(y + h + 0.5));
+
+    for (let j = j0; j <= j1; j++) {
+      const cy = j + 0.5;
+      if (cy < y - 0.5 || cy > y + h + 0.5) continue;
+      for (let i = i0; i <= i1; i++) {
+        const cx = i + 0.5;
+        if (cx < x - 0.5 || cx > x + w + 0.5) continue;
+        const k = j * this.w + i;
+        if (this.scratch[k] === 0) this.touched[this.touchedCount++] = k;
+        if (this.scratch[k]! < value) this.scratch[k] = value;
+      }
+    }
+  }
+
   /**
    * Луч от (x, y) длиной length. Обрывается о первое укрытие: место за
    * укрытием само собой оказывается безопасным, и герой это видит.

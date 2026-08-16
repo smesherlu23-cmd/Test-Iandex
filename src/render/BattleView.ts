@@ -13,6 +13,7 @@ const COLORS = {
   hero: '#4fd1c5',
   heroDead: '#4a4a58',
   projectile: '#ff9f43',
+  minion: '#e07b53',
   /** ТЗ §10: телеграф всегда один и тот же красный, без палитры по типам. */
   telegraph: '224, 49, 49',
   active: '255, 138, 128',
@@ -89,6 +90,7 @@ export class BattleView {
     this.drawCovers(state);
     this.drawHazards(state);
     this.drawProjectiles(state);
+    this.drawMinions(state);
     this.drawBoss(state);
     this.drawHero(state);
     this.drawHud(state, fps);
@@ -155,6 +157,8 @@ export class BattleView {
   private drawHazards(state: BattleState): void {
     const c = this.ctx;
     for (const h of state.hazards) {
+      // Ловушка невидима до срабатывания — игрок видит ровно то же, что герой.
+      if (h.hidden) continue;
       const warning = state.time < h.activeFrom;
       const lead = h.activeFrom - h.visibleAt;
       const progress = lead > 0 ? (state.time - h.visibleAt) / lead : 1;
@@ -168,20 +172,52 @@ export class BattleView {
 
   private traceHazard(shape: HazardShape): void {
     const c = this.ctx;
-    c.beginPath();
-    if (shape.kind === 'circle') {
-      c.arc(this.sx(shape.x), this.sy(shape.y), shape.r * this.scale, 0, Math.PI * 2);
-      return;
-    }
-    // Луч рисуется прямоугольной полосой вдоль своего направления.
-    const half = (shape.width / 2) * this.scale;
     const x = this.sx(shape.x);
     const y = this.sy(shape.y);
-    c.save();
-    c.translate(x, y);
-    c.rotate(shape.angle);
-    c.rect(0, -half, shape.length * this.scale, half * 2);
-    c.restore();
+    c.beginPath();
+
+    switch (shape.kind) {
+      case 'circle':
+        c.arc(x, y, shape.r * this.scale, 0, Math.PI * 2);
+        return;
+
+      case 'rect':
+        c.rect(x, y, shape.w * this.scale, shape.h * this.scale);
+        return;
+
+      case 'wedge':
+        c.moveTo(x, y);
+        c.arc(
+          x,
+          y,
+          shape.radius * this.scale,
+          shape.angle - shape.spread / 2,
+          shape.angle + shape.spread / 2,
+        );
+        c.closePath();
+        return;
+
+      case 'ray': {
+        // Луч рисуется прямоугольной полосой вдоль своего направления.
+        const half = (shape.width / 2) * this.scale;
+        c.save();
+        c.translate(x, y);
+        c.rotate(shape.angle);
+        c.rect(0, -half, shape.length * this.scale, half * 2);
+        c.restore();
+        return;
+      }
+    }
+  }
+
+  private drawMinions(state: BattleState): void {
+    const c = this.ctx;
+    c.fillStyle = COLORS.minion;
+    for (const m of state.minions) {
+      c.beginPath();
+      c.arc(this.sx(m.x), this.sy(m.y), m.r * this.scale, 0, Math.PI * 2);
+      c.fill();
+    }
   }
 
   private drawProjectiles(state: BattleState): void {
@@ -223,6 +259,15 @@ export class BattleView {
     c.fillRect(barX, barY, barW, barH);
     c.fillStyle = ratio > 0.4 ? '#4fd1c5' : ratio > 0.2 ? '#ffd166' : '#ef476f';
     c.fillRect(barX, barY, barW * ratio, barH);
+
+    // Обездвиженный и замедленный герой обводится, чтобы это читалось сразу.
+    if (hero.rooted || hero.slowed) {
+      c.strokeStyle = hero.rooted ? '#ef476f' : '#ffd166';
+      c.lineWidth = 2;
+      c.beginPath();
+      c.arc(this.sx(hero.x), this.sy(hero.y), (hero.r + 0.25) * this.scale, 0, Math.PI * 2);
+      c.stroke();
+    }
   }
 
   private drawHud(state: BattleState, fps: number): void {
