@@ -207,12 +207,13 @@ describe('цикл забега', () => {
       expect(game.battleFinished).toBe(true);
       expect(game.battle!.outcome).not.toBeNull();
 
+      game.closeBattle();
+      expect(game.result!.wave).toBe(wave);
+      if (game.phase === 'over') break;
       game.nextWave();
       expect(game.battle).toBeNull();
-      expect(game.lastWave).toBe(wave);
     }
 
-    expect(game.run.wave).toBe(waves + 1);
     expect(game.run.hand.length).toBeGreaterThan(0);
   });
 

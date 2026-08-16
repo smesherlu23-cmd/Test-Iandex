@@ -1,21 +1,20 @@
 import type { PoolEntry } from '../draft/CardPool';
-import type { BattleOutcome } from '../sim/Battle';
 import { Battle } from '../sim/Battle';
+import type { WaveResult } from './Run';
 import { Run } from './Run';
 
 /**
- * Автомат забега. Мета-меню, итог волны и экран забега появятся на Этапах 4 и 7;
- * пока цикл состоит из двух состояний: драфт и бой.
+ * Автомат забега: драфт → бой → итог волны → драфт, и так до потери третьей
+ * жизни босса. Мета-меню и экран забега появятся на Этапе 7.
  */
-export type GamePhase = 'draft' | 'battle';
+export type GamePhase = 'draft' | 'battle' | 'result' | 'over';
 
 export class Game {
   readonly run: Run;
   phase: GamePhase = 'draft';
   battle: Battle | null = null;
-  /** Исход прошлой волны — показывается в шапке драфта. */
-  lastOutcome: BattleOutcome | null = null;
-  lastWave = 0;
+  /** Итог последней волны — его показывает ResultScreen. */
+  result: WaveResult | null = null;
 
   constructor(seed: number, pool?: readonly PoolEntry[]) {
     this.run = pool ? new Run(seed, pool) : new Run(seed);
@@ -23,12 +22,12 @@ export class Game {
 
   /** Запустить бой по текущей расстановке. */
   startBattle(): void {
-    if (this.phase === 'battle') return;
-    this.battle = new Battle({ timeline: this.run.timeline }, this.run.battleSeed());
+    if (this.phase !== 'draft') return;
+    this.battle = new Battle(this.run.battleConfig(), this.run.battleSeed());
     this.phase = 'battle';
   }
 
-  /** Один шаг симуляции; в драфте ничего не делает. */
+  /** Один шаг симуляции; вне боя ничего не делает. */
   step(): void {
     if (this.phase === 'battle') this.battle?.step();
   }
@@ -37,13 +36,25 @@ export class Game {
     return this.phase === 'battle' && (this.battle?.finished ?? false);
   }
 
-  /** Итог волны просмотрен: следующая волна и новый драфт. */
+  /** Бой досмотрен: свести итог волны и решить, продолжается ли забег. */
+  closeBattle(): void {
+    const battle = this.battle;
+    if (!this.battleFinished || !battle || !battle.outcome) return;
+
+    this.result = this.run.finishWave(battle.events, battle.outcome);
+    this.phase = this.run.over ? 'over' : 'result';
+  }
+
+  /** Итог волны прочитан: следующая волна и новый драфт. */
   nextWave(): void {
-    if (!this.battleFinished) return;
-    this.lastOutcome = this.battle?.outcome ?? null;
-    this.lastWave = this.run.wave;
+    if (this.phase !== 'result') return;
     this.battle = null;
-    this.phase = 'draft';
     this.run.nextWave();
+    this.phase = 'draft';
+  }
+
+  /** Сколько волн босс выдержал — метрика забега для лидерборда (ТЗ §7). */
+  get wavesSurvived(): number {
+    return this.result ? this.result.wave : 0;
   }
 }

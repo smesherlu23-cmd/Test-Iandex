@@ -1,0 +1,70 @@
+.result {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(7, 7, 12, 0.82);
+  color: #e8e8f2;
+  font: 400 14px/1.4 system-ui, -apple-system, sans-serif;
+}
+
+.result[hidden] {
+  display: none;
+}
+
+.result-card {
+  width: 100%;
+  max-width: 360px;
+  padding: 18px;
+  border: 1px solid #2f2f45;
+  border-radius: 14px;
+  background: #12121c;
+}
+
+.result-title {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.result-note {
+  margin-top: 2px;
+  color: #8a8aa0;
+  font-size: 12px;
+}
+
+.result-stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: 16px 0 18px;
+}
+
+.result-stats dt {
+  color: #8a8aa0;
+  font-size: 12px;
+}
+
+.result-stats dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.result-next {
+  width: 100%;
+  padding: 13px;
+  border: 0;
+  border-radius: 10px;
+  background: #6b3fa0;
+  color: #fff;
+  font: 700 15px system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+}
+
+.result-next:active {
+  background: #7d4dbb;
+}

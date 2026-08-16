@@ -1,15 +1,16 @@
 import type { Run } from '../core/Run';
 import type { SlotPlan } from '../draft/Timeline';
 import { SLOT_COUNT, place, planTimeline } from '../draft/Timeline';
-import type { BattleOutcome } from '../sim/Battle';
 import type { PatternCard } from '../sim/Boss';
 import './draft.css';
 
 /** Строки собраны в одном месте: словарь ru/en появится на Этапе 7. */
 const TEXT = {
   wave: (n: number) => `Волна ${n}`,
-  survived: 'герой выжил',
-  killed: 'герой погиб',
+  lives: (n: number) => `${'●'.repeat(Math.max(0, n))} жизни`,
+  /** Способности вводятся с явным анонсом на экране драфта (ТЗ §6). */
+  learned: (wave: number, name: string) => `Волна ${wave}: герой освоил ${name}`,
+  known: (percent: number) => `знакомство ${percent}%`,
   offer: 'Возьми карту',
   offerEmpty: 'Новых карт пока нет',
   hand: 'Рука',
@@ -38,6 +39,7 @@ export class DraftScreen {
   private readonly root: HTMLElement;
   private readonly waveEl: HTMLElement;
   private readonly noteEl: HTMLElement;
+  private readonly learnedEl: HTMLElement;
   private readonly offerTitle: HTMLElement;
   private readonly offerEl: HTMLElement;
   private readonly handTitle: HTMLElement;
@@ -46,7 +48,6 @@ export class DraftScreen {
   private readonly onFight: () => void;
 
   private run: Run | null = null;
-  private note: BattleOutcome | null = null;
 
   private dragCard: PatternCard | null = null;
   private dragFrom: number | null = null;
@@ -67,6 +68,7 @@ export class DraftScreen {
         <div class="draft-wave"></div>
         <div class="draft-note"></div>
       </div>
+      <div class="draft-learned" hidden></div>
       <section>
         <h2 class="draft-offer-title"></h2>
         <div class="draft-cards draft-offer"></div>
@@ -86,6 +88,7 @@ export class DraftScreen {
 
     this.waveEl = this.query('.draft-wave');
     this.noteEl = this.query('.draft-note');
+    this.learnedEl = this.query('.draft-learned');
     this.offerTitle = this.query('.draft-offer-title');
     this.offerEl = this.query('.draft-offer');
     this.handTitle = this.query('.draft-hand-title');
@@ -97,9 +100,8 @@ export class DraftScreen {
   }
 
   /** Показать экран для текущего состояния забега. */
-  show(run: Run, lastOutcome: BattleOutcome | null = null): void {
+  show(run: Run): void {
     this.run = run;
-    this.note = lastOutcome;
     this.root.hidden = false;
     this.render();
   }
@@ -115,8 +117,13 @@ export class DraftScreen {
     if (!run) return;
 
     this.waveEl.textContent = TEXT.wave(run.wave);
-    this.noteEl.textContent =
-      this.note === null ? '' : this.note === 'boss_win' ? TEXT.killed : TEXT.survived;
+    this.noteEl.textContent = TEXT.lives(run.lives);
+
+    const gained = run.newAbilities;
+    this.learnedEl.hidden = gained.length === 0;
+    this.learnedEl.textContent = gained
+      .map((a) => TEXT.learned(run.wave, a.name))
+      .join(' · ');
 
     this.offerTitle.textContent = run.offer.length > 0 ? TEXT.offer : TEXT.offerEmpty;
     this.offerEl.replaceChildren(
@@ -124,7 +131,9 @@ export class DraftScreen {
     );
 
     this.handTitle.textContent = run.hand.length > 0 ? TEXT.hand : TEXT.handEmpty;
-    this.handEl.replaceChildren(...run.hand.map((card) => this.handCardEl(card)));
+    this.handEl.replaceChildren(
+      ...run.hand.map((card) => this.handCardEl(card, run.familiarity[card.id] ?? 0)),
+    );
 
     this.renderSlots(planTimeline(run.timeline));
   }
@@ -170,8 +179,15 @@ export class DraftScreen {
     return el;
   }
 
-  private handCardEl(card: PatternCard): HTMLElement {
+  private handCardEl(card: PatternCard, familiarity: number): HTMLElement {
     const el = this.cardEl(card, () => {});
+    if (familiarity > 0) {
+      // Игрок должен видеть, что герой к карте привыкает (ТЗ §6).
+      const known = document.createElement('div');
+      known.className = 'card-known';
+      known.textContent = TEXT.known(Math.round(familiarity * 100));
+      el.appendChild(known);
+    }
     el.addEventListener('pointerdown', (ev) => this.beginDrag(ev, card, null));
     return el;
   }

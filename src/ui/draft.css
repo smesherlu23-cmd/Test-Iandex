@@ -42,6 +42,25 @@
   font-size: 12px;
 }
 
+.draft-learned {
+  padding: 8px 10px;
+  border: 1px solid #4a3a6b;
+  border-radius: 8px;
+  background: #1a1430;
+  color: #cdb8f0;
+  font-size: 12px;
+}
+
+.draft-learned[hidden] {
+  display: none;
+}
+
+.card-known {
+  margin-top: 2px;
+  font-size: 10px;
+  color: #cdb8f0;
+}
+
 .draft-cards {
   display: flex;
   flex-wrap: wrap;
