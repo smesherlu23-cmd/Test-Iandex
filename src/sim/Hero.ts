@@ -1,3 +1,4 @@
+import type { HeroAbility } from '../data/heroTiers';
 import { HERO_AI, TUNING } from '../data/tuning';
 import type { Arena } from './Arena';
 import { clamp, segmentRect } from './Collision';
@@ -42,6 +43,22 @@ export interface HeroConfig {
   readonly hp: number;
   readonly speed: number;
   readonly rng: Rng;
+  /** Базовое время реакции волны; по умолчанию стартовое из tuning. */
+  readonly reaction?: number;
+  /** Урон героя по боссу; растёт с волной. */
+  readonly damage?: number;
+  readonly abilities?: readonly HeroAbility[];
+  /** Насколько герой знаком с каждой картой, 0..1 (ТЗ §6). */
+  readonly familiarity?: Readonly<Record<string, number>>;
+}
+
+/** Что случилось с прилетевшим уроном — Battle превращает это в события. */
+export interface DamageResult {
+  /** Урон, реально снятый со здоровья. */
+  readonly amount: number;
+  readonly parried: boolean;
+  readonly blocked: boolean;
+  readonly secondWind: boolean;
 }
 
 interface Spot {
@@ -67,8 +84,11 @@ export class Hero {
   readonly r = 0.45;
   readonly maxHp: number;
   readonly speed: number;
-  /** Базовая задержка, с которой герой замечает телеграф. Familiarity умножит её на Этапе 4. */
-  readonly baseReaction = TUNING.HERO_BASE_REACTION;
+  /** Базовая задержка, с которой герой замечает телеграф. */
+  readonly baseReaction: number;
+  /** Урон героя по боссу. */
+  readonly damage: number;
+  readonly abilities: ReadonlySet<HeroAbility>;
 
   x: number;
   y: number;
@@ -84,6 +104,16 @@ export class Hero {
   /** Остаток замаха: пока идёт, герой прикован к месту. */
   strikeLock = 0;
 
+  /** Остаток рывка и кулдауны способностей. */
+  dashTime = 0;
+  dashCd = 0;
+  blockCd = 0;
+  parryCd = 0;
+  secondWindUsed = false;
+  /** Опасность в точке героя на прошлом тике: парировать можно лишь замеченное. */
+  private lastDanger = 0;
+  private readonly familiarity: Readonly<Record<string, number>>;
+
   /** Точки обзора переиспользуются: 33 объекта на кадр — это 79 тысяч за бой. */
   private readonly spots: Spot[] = Array.from(
     { length: 1 + HERO_AI.DIRECTIONS * HERO_AI.LOOKAHEAD.length },
@@ -96,15 +126,34 @@ export class Hero {
     return this.hp < this.maxHp * HERO_AI.PANIC_HP;
   }
 
-  /** Текущее время реакции на телеграф. */
+  /** Текущее время реакции на незнакомую атаку. */
   get reaction(): number {
     return this.panicking ? this.baseReaction * HERO_AI.PANIC_REACTION : this.baseReaction;
+  }
+
+  has(ability: HeroAbility): boolean {
+    return this.abilities.has(ability);
+  }
+
+  /**
+   * Реакция на конкретную карту: чем чаще игрок её ставит, тем раньше герой
+   * её замечает (ТЗ §6). Выше порога знакомства он читает атаку сразу по
+   * объявлению и начинает уходить ещё до конца телеграфа.
+   */
+  reactionTo(card: string): number {
+    const known = this.familiarity[card] ?? 0;
+    if (known > TUNING.FAMILIARITY_PREDICT_THRESHOLD) return 0;
+    return this.reaction * (1 - known * TUNING.FAMILIARITY_REACTION_FACTOR);
   }
 
   constructor(config: HeroConfig) {
     this.maxHp = config.hp;
     this.hp = config.hp;
     this.speed = config.speed;
+    this.baseReaction = config.reaction ?? TUNING.HERO_BASE_REACTION;
+    this.damage = config.damage ?? HERO_AI.ATTACK_DAMAGE;
+    this.abilities = new Set(config.abilities ?? []);
+    this.familiarity = config.familiarity ?? {};
     // От сида зависит только точка старта в нижней части арены.
     this.x = config.rng.range(3.5, 12.5);
     this.y = config.rng.range(14.5, 18.5);
@@ -113,9 +162,14 @@ export class Hero {
   update(dt: number, senses: HeroSenses): HeroOutcome {
     if (!this.alive) return IDLE;
 
-    if (this.attackCd > 0) this.attackCd = Math.max(0, this.attackCd - dt);
+    this.attackCd = Math.max(0, this.attackCd - dt);
+    this.dashCd = Math.max(0, this.dashCd - dt);
+    this.dashTime = Math.max(0, this.dashTime - dt);
+    this.blockCd = Math.max(0, this.blockCd - dt);
+    this.parryCd = Math.max(0, this.parryCd - dt);
 
     const dangerHere = senses.danger.at(this.x, this.y);
+    this.lastDanger = dangerHere;
     this.calm = dangerHere <= HERO_AI.SAFE_DANGER ? this.calm + dt : 0;
 
     if (this.strikeLock > 0) {
@@ -139,6 +193,17 @@ export class Hero {
       return { attacked: false, drankPotion: true, actionChanged };
     }
 
+    // Рывок: короткий разгон, чтобы вырваться из зоны, которую пешком не пройти.
+    if (
+      choice.kind === 'dodge' &&
+      this.has('dash') &&
+      this.dashCd <= 0 &&
+      dangerHere > HERO_AI.SAFE_DANGER
+    ) {
+      this.dashTime = HERO_AI.DASH_TIME;
+      this.dashCd = HERO_AI.DASH_CD;
+    }
+
     this.moveTowards(choice.x, choice.y, dt, senses.arena);
 
     let attacked = false;
@@ -151,14 +216,42 @@ export class Hero {
     return { attacked, drankPotion: false, actionChanged };
   }
 
-  takeDamage(amount: number): void {
-    if (!this.alive) return;
-    this.hp -= amount;
-    this.calm = 0;
-    if (this.hp <= 0) {
-      this.hp = 0;
-      this.alive = false;
+  /**
+   * Приём урона со способностями волны: парирование гасит удар целиком, блок
+   * срезает половину, второе дыхание один раз за бой не даёт умереть.
+   */
+  takeDamage(amount: number): DamageResult {
+    if (!this.alive) {
+      return { amount: 0, parried: false, blocked: false, secondWind: false };
     }
+    this.calm = 0;
+
+    // Парировать можно лишь то, что герой видел в карте опасности.
+    if (this.has('parry') && this.parryCd <= 0 && this.lastDanger > HERO_AI.SAFE_DANGER) {
+      this.parryCd = HERO_AI.PARRY_CD;
+      return { amount: 0, parried: true, blocked: false, secondWind: false };
+    }
+
+    let blocked = false;
+    let taken = amount;
+    if (this.has('block') && this.blockCd <= 0) {
+      this.blockCd = HERO_AI.BLOCK_CD;
+      taken = amount * (1 - HERO_AI.BLOCK_REDUCTION);
+      blocked = true;
+    }
+
+    this.hp -= taken;
+    if (this.hp > 0) return { amount: taken, parried: false, blocked, secondWind: false };
+
+    if (this.has('second_wind') && !this.secondWindUsed) {
+      this.secondWindUsed = true;
+      this.hp = HERO_AI.SECOND_WIND_HP;
+      return { amount: taken, parried: false, blocked, secondWind: true };
+    }
+
+    this.hp = 0;
+    this.alive = false;
+    return { amount: taken, parried: false, blocked, secondWind: false };
   }
 
   private inStrikeRange(senses: HeroSenses): boolean {
@@ -352,8 +445,9 @@ export class Hero {
 
     let wantVx = 0;
     let wantVy = 0;
+    const top = this.dashTime > 0 ? this.speed * HERO_AI.DASH_SPEED : this.speed;
     if (len > 0.05) {
-      const want = Math.min(this.speed, len / dt);
+      const want = Math.min(top, len / dt);
       wantVx = (dx / len) * want;
       wantVy = (dy / len) * want;
     }
@@ -361,7 +455,8 @@ export class Hero {
     const dvx = wantVx - this.vx;
     const dvy = wantVy - this.vy;
     const dv = Math.sqrt(dvx * dvx + dvy * dvy);
-    const maxDv = HERO_AI.ACCEL * dt;
+    // В рывке и разгон резче, иначе окно в четверть секунды ничего не даёт.
+    const maxDv = HERO_AI.ACCEL * (this.dashTime > 0 ? HERO_AI.DASH_SPEED : 1) * dt;
     if (dv > maxDv) {
       this.vx += (dvx / dv) * maxDv;
       this.vy += (dvy / dv) * maxDv;

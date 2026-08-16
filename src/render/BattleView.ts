@@ -1,4 +1,5 @@
 import { TUNING } from '../data/tuning';
+import { Arena, BOSS_ANCHOR } from '../sim/Arena';
 import type { BattleState } from '../sim/Battle';
 import type { HazardShape } from '../sim/Hazard';
 
@@ -18,6 +19,9 @@ const COLORS = {
   hud: '#8a8aa0',
   hudStrong: '#e8e8f2',
 } as const;
+
+/** Геометрия для фона драфта: боя ещё нет, а укрытия рисовать надо. */
+const IDLE_ARENA = new Arena();
 
 const ACTION_LABELS = {
   dodge: 'уклоняется',
@@ -88,6 +92,30 @@ export class BattleView {
     this.drawBoss(state);
     this.drawHero(state);
     this.drawHud(state, fps);
+  }
+
+  /** Пустая арена под экраном драфта: боя ещё нет, а фон должен жить. */
+  drawIdle(fps: number): void {
+    const c = this.ctx;
+    c.fillStyle = COLORS.page;
+    c.fillRect(0, 0, this.cssW, this.cssH);
+
+    this.drawArena();
+    c.fillStyle = COLORS.cover;
+    for (const cover of IDLE_ARENA.covers) {
+      c.fillRect(this.sx(cover.x), this.sy(cover.y), cover.w * this.scale, cover.h * this.scale);
+    }
+
+    c.fillStyle = COLORS.boss;
+    c.beginPath();
+    c.arc(this.sx(BOSS_ANCHOR.x), this.sy(BOSS_ANCHOR.y), BOSS_ANCHOR.r * this.scale, 0, Math.PI * 2);
+    c.fill();
+
+    c.textAlign = 'left';
+    c.textBaseline = 'top';
+    c.font = '600 13px ui-monospace, Menlo, Consolas, monospace';
+    c.fillStyle = COLORS.hudStrong;
+    c.fillText(`FPS ${fps.toFixed(0)}`, 10, 10);
   }
 
   private sx(x: number): number {

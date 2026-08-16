@@ -18,6 +18,10 @@ export type BattleEventBody =
   | { type: 'hero_action'; kind: HeroActionKind }
   | { type: 'hero_hit'; source: string; damage: number; hp: number }
   | { type: 'hero_potion'; hp: number; left: number }
+  | { type: 'hero_dodge_dash' }
+  | { type: 'hero_parry'; source: string }
+  | { type: 'hero_block'; source: string; damage: number }
+  | { type: 'hero_second_wind'; hp: number }
   | { type: 'hero_died'; x: number; y: number }
   | { type: 'boss_hit'; damage: number; total: number }
   | { type: 'battle_end'; outcome: BattleOutcome; duration: number };

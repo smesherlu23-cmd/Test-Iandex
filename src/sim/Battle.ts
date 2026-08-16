@@ -1,3 +1,4 @@
+import type { HeroAbility } from '../data/heroTiers';
 import { HERO_AI, TICK_RATE, TUNING } from '../data/tuning';
 import type { Cover } from './Arena';
 import { Arena } from './Arena';
@@ -23,6 +24,12 @@ export interface BattleConfig {
   readonly heroHp?: number;
   readonly heroSpeed?: number;
   readonly maxTime?: number;
+  /** Уровень героя на этой волне (ТЗ §6). */
+  readonly heroReaction?: number;
+  readonly heroDamage?: number;
+  readonly heroAbilities?: readonly HeroAbility[];
+  /** Насколько герой знаком с каждой картой: 0..1. */
+  readonly familiarity?: Readonly<Record<string, number>>;
 }
 
 /** Победа босса — герой погиб за отведённое время; иначе выжил. */
@@ -104,6 +111,10 @@ export class Battle implements BattleCtx {
       hp: config.heroHp ?? TUNING.HERO_BASE_HP,
       speed: config.heroSpeed ?? TUNING.HERO_BASE_SPEED,
       rng: this.rng,
+      ...(config.heroReaction === undefined ? {} : { reaction: config.heroReaction }),
+      ...(config.heroDamage === undefined ? {} : { damage: config.heroDamage }),
+      ...(config.heroAbilities === undefined ? {} : { abilities: config.heroAbilities }),
+      ...(config.familiarity === undefined ? {} : { familiarity: config.familiarity }),
     });
     this.maxTicks = Math.round((config.maxTime ?? TUNING.BATTLE_MAX_TIME) * TICK_RATE);
     this.emit({ type: 'battle_start', seed: seed >>> 0 });
@@ -148,8 +159,8 @@ export class Battle implements BattleCtx {
       this.emit({ type: 'hero_potion', hp: this.hero.hp, left: this.hero.potions });
     }
     if (outcome.attacked) {
-      this.boss.damageTaken += HERO_AI.ATTACK_DAMAGE;
-      this.emit({ type: 'boss_hit', damage: HERO_AI.ATTACK_DAMAGE, total: this.boss.damageTaken });
+      this.boss.damageTaken += this.hero.damage;
+      this.emit({ type: 'boss_hit', damage: this.hero.damage, total: this.boss.damageTaken });
     }
 
     this.stepHazards();
@@ -208,8 +219,9 @@ export class Battle implements BattleCtx {
       ...spec,
       id,
       group: this.groupFor(spec.source),
-      // Герой замечает объявленную зону не мгновенно, а спустя время реакции.
-      visibleAt: this.timeSec + this.hero.reaction,
+      // Замечает не мгновенно: время реакции тем короче, чем чаще игрок
+      // ставил эту карту раньше (ТЗ §6).
+      visibleAt: this.timeSec + this.hero.reactionTo(spec.source),
       struck: false,
       nextTick: spec.activeFrom,
     });
@@ -399,8 +411,16 @@ export class Battle implements BattleCtx {
   }
 
   private damageHero(amount: number, source: string): void {
-    this.hero.takeDamage(amount);
-    this.emit({ type: 'hero_hit', source, damage: amount, hp: this.hero.hp });
+    const result = this.hero.takeDamage(amount);
+
+    if (result.parried) {
+      this.emit({ type: 'hero_parry', source });
+      return;
+    }
+    if (result.blocked) this.emit({ type: 'hero_block', source, damage: result.amount });
+
+    this.emit({ type: 'hero_hit', source, damage: result.amount, hp: this.hero.hp });
+    if (result.secondWind) this.emit({ type: 'hero_second_wind', hp: this.hero.hp });
     if (!this.hero.alive) {
       this.emit({ type: 'hero_died', x: this.hero.x, y: this.hero.y });
     }
