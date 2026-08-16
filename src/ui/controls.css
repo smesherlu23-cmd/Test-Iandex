@@ -1,0 +1,58 @@
+.controls {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(10px + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 12px;
+  font: 600 14px system-ui, -apple-system, sans-serif;
+}
+
+.controls[hidden] {
+  display: none;
+}
+
+.controls-speeds {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(18, 18, 28, 0.85);
+}
+
+.controls-button {
+  min-width: 44px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid #2f2f45;
+  border-radius: 8px;
+  background: rgba(18, 18, 28, 0.85);
+  color: #c8c8d8;
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.controls-speeds .controls-button {
+  min-width: 40px;
+  padding: 0 8px;
+}
+
+.controls-button.active {
+  border-color: #6b3fa0;
+  background: #6b3fa0;
+  color: #fff;
+}
+
+.controls-button:active {
+  border-color: #9c6ad6;
+}
+
+.controls-sound {
+  min-width: 44px;
+  padding: 0;
+  font-size: 16px;
+}

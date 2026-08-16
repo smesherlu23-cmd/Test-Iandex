@@ -11,6 +11,8 @@ import type { Hazard, HazardSpec } from './Hazard';
 import { HAZARD_TICK, hazardContains, hazardDistance, stampHazard } from './Hazard';
 import type { HeroActionKind, HeroSenses } from './Hero';
 import { Hero } from './Hero';
+import type { Minion, MinionSpawn } from './Minion';
+import { MINION_HIT_CD, chase } from './Minion';
 import type { Projectile, ProjectileSpawn } from './Projectile';
 import { advance } from './Projectile';
 import { Rng } from './Rng';
@@ -58,6 +60,8 @@ export interface HeroView {
   readonly alive: boolean;
   readonly potions: number;
   readonly action: HeroActionKind;
+  readonly slowed: boolean;
+  readonly rooted: boolean;
 }
 
 export interface BattleState {
@@ -69,6 +73,7 @@ export interface BattleState {
   readonly hero: HeroView;
   readonly projectiles: readonly Readonly<Projectile>[];
   readonly hazards: readonly Readonly<Hazard>[];
+  readonly minions: readonly Readonly<Minion>[];
   readonly covers: readonly Readonly<Cover>[];
 }
 
@@ -86,6 +91,7 @@ export class Battle implements BattleCtx {
 
   private readonly projectiles: Projectile[] = [];
   private readonly hazards: Hazard[] = [];
+  private readonly minions: Minion[] = [];
   private readonly log: BattleEvent[] = [];
   private readonly maxTicks: number;
 
@@ -93,6 +99,7 @@ export class Battle implements BattleCtx {
   private timeSec = 0;
   private nextProjectileId = 0;
   private nextHazardId = 0;
+  private nextMinionId = 0;
   private outcomeValue: BattleOutcome | null = null;
 
   /** Отладка баланса: сколько угроз герой видел на последней пересборке карты. */
@@ -155,15 +162,24 @@ export class Battle implements BattleCtx {
 
     const outcome = this.hero.update(dt, this.senses());
     if (outcome.actionChanged) this.emit({ type: 'hero_action', kind: this.hero.action });
+    if (outcome.dashed) this.emit({ type: 'hero_dodge_dash' });
     if (outcome.drankPotion) {
       this.emit({ type: 'hero_potion', hp: this.hero.hp, left: this.hero.potions });
     }
     if (outcome.attacked) {
-      this.boss.damageTaken += this.hero.damage;
-      this.emit({ type: 'boss_hit', damage: this.hero.damage, total: this.boss.damageTaken });
+      const minion = this.minionInReach();
+      if (minion) {
+        minion.hp -= this.hero.damage;
+        this.emit({ type: 'minion_hit', id: minion.id, damage: this.hero.damage });
+      } else {
+        this.boss.damageTaken += this.hero.damage;
+        this.emit({ type: 'boss_hit', damage: this.hero.damage, total: this.boss.damageTaken });
+      }
     }
 
     this.stepHazards();
+    this.expireTriggered();
+    this.stepMinions(dt);
     this.stepProjectiles(dt);
     this.checkEnd();
   }
@@ -197,9 +213,12 @@ export class Battle implements BattleCtx {
         alive: this.hero.alive,
         potions: this.hero.potions,
         action: this.hero.action,
+        slowed: this.hero.slowFor > 0,
+        rooted: this.hero.rootFor > 0,
       },
       projectiles: this.projectiles,
       hazards: this.hazards,
+      minions: this.minions,
       covers: this.arena.covers,
     };
   }
@@ -213,9 +232,41 @@ export class Battle implements BattleCtx {
     return id;
   }
 
+  /** Телеграф текущей карты с учётом «Ярости». */
+  get telegraph(): number {
+    return this.boss.telegraph;
+  }
+
+  spawnMinion(spec: MinionSpawn): number {
+    const id = this.nextMinionId++;
+    this.minions.push({ ...spec, id, group: this.groupFor(spec.source), cd: 0 });
+    this.emit({ type: 'minion_spawn', id, source: spec.source, x: spec.x, y: spec.y });
+    return id;
+  }
+
+  chargeBoss(angle: number, distance: number, duration: number): void {
+    this.boss.charge(angle, distance, duration);
+  }
+
+  hasteBoss(duration: number, factor: number): void {
+    this.boss.haste(this.timeSec, duration, factor);
+    this.emit({ type: 'boss_haste', until: this.timeSec + duration, factor });
+  }
+
+  destroyCovers(x: number, y: number, count: number): number {
+    const gone = this.arena.destroyNearest(x, y, count);
+    for (const cover of gone) this.emit({ type: 'cover_destroyed', cover: cover.id });
+    return gone.length;
+  }
+
   addHazard(spec: HazardSpec): number {
     const id = this.nextHazardId++;
     this.hazards.push({
+      hidden: false,
+      slow: 0,
+      slowFor: 0,
+      root: 0,
+      onEnter: false,
       ...spec,
       id,
       group: this.groupFor(spec.source),
@@ -274,9 +325,19 @@ export class Battle implements BattleCtx {
     const tracked = this.trackedThreats();
 
     for (const h of this.hazards) {
-      if (!tracked.has(h.group)) continue;
+      if (h.hidden || !tracked.has(h.group)) continue;
       this.danger.begin();
       stampHazard(this.danger, h.shape, h.danger, this.arena);
+      this.danger.commit();
+    }
+
+    for (const m of this.minions) {
+      if (!tracked.has(m.group)) continue;
+      this.danger.begin();
+      // Прислужник опасен не одним ударом, а тем, что не отстаёт: помечаем
+      // его как источник постоянного давления, иначе герой не видит смысла
+      // убегать и молча выкашивается контактным уроном.
+      this.danger.circle(m.x, m.y, m.r + 1.4, (m.damage / MINION_HIT_CD) * HERO_AI.DANGER_HORIZON * 2.5);
       this.danger.commit();
     }
 
@@ -321,11 +382,18 @@ export class Battle implements BattleCtx {
     };
 
     for (const h of this.hazards) {
+      if (h.hidden || h.danger <= 0) continue; // невидимое и безобидное внимания не занимает
       if (this.timeSec < h.visibleAt) continue; // ещё не заметил
       if (h.activeFrom > horizon) continue; // слишком далеко в будущем
       const wait = Math.max(0, h.activeFrom - this.timeSec);
       const reach = hazardDistance(h.shape, this.hero.x, this.hero.y) / this.hero.speed;
       note(h.group, wait + reach);
+    }
+
+    for (const m of this.minions) {
+      const dx = m.x - this.hero.x;
+      const dy = m.y - this.hero.y;
+      note(m.group, Math.max(0, Math.sqrt(dx * dx + dy * dy) - m.r) / Math.max(0.1, m.speed));
     }
 
     for (const p of this.projectiles) {
@@ -366,9 +434,13 @@ export class Battle implements BattleCtx {
       if (this.timeSec < h.activeFrom) continue;
       const inside = hazardContains(h.shape, this.hero.x, this.hero.y, this.hero.r);
 
-      if (!h.struck) {
+      // Ловушка ждёт, пока герой на неё наступит, обычная зона бьёт по времени.
+      if (!h.struck && (h.onEnter ? inside : true)) {
         h.struck = true;
-        if (h.impact > 0 && inside) this.damageHero(h.impact, h.source);
+        if (inside) {
+          this.applyStatus(h);
+          if (h.impact > 0) this.damageHero(h.impact, h.source);
+        }
       }
 
       if (h.dps > 0 && this.timeSec >= h.nextTick) {
@@ -378,6 +450,65 @@ export class Battle implements BattleCtx {
 
       if (!this.hero.alive) return;
     }
+  }
+
+  private applyStatus(h: Hazard): void {
+    if (h.slowFor <= 0 && h.root <= 0) return;
+    this.hero.applyStatus(h.slow, h.slowFor, h.root);
+    this.emit({ type: 'hero_status', source: h.source, slow: h.slow, root: h.root });
+  }
+
+  /** Сработавшая ловушка исчезает; остальные зоны живут до срока. */
+  private expireTriggered(): void {
+    const arr = this.hazards;
+    let write = 0;
+    for (let i = 0; i < arr.length; i++) {
+      const h = arr[i]!;
+      if (h.onEnter && h.struck) continue;
+      arr[write++] = h;
+    }
+    arr.length = write;
+  }
+
+  private stepMinions(dt: number): void {
+    const arr = this.minions;
+    let write = 0;
+
+    for (let i = 0; i < arr.length; i++) {
+      const m = arr[i]!;
+      chase(m, this.hero.x, this.hero.y, dt);
+
+      if (m.hp <= 0 || m.life <= 0) {
+        this.emit({ type: 'minion_gone', id: m.id });
+        continue;
+      }
+
+      if (this.hero.alive && m.cd <= 0 && circleCircle(m, this.hero)) {
+        m.cd = MINION_HIT_CD;
+        this.damageHero(m.damage, m.source);
+      }
+
+      arr[write++] = m;
+    }
+
+    arr.length = write;
+  }
+
+  /** Ближайший прислужник в пределах удара — герой бьёт того, кто рядом. */
+  private minionInReach(): Minion | null {
+    let best: Minion | null = null;
+    let bestDist = Infinity;
+    for (const m of this.minions) {
+      const dx = m.x - this.hero.x;
+      const dy = m.y - this.hero.y;
+      const reach = m.r + this.hero.r + HERO_AI.ATTACK_RANGE;
+      const d = dx * dx + dy * dy;
+      if (d <= reach * reach && d < bestDist) {
+        bestDist = d;
+        best = m;
+      }
+    }
+    return best;
   }
 
   private stepProjectiles(dt: number): void {

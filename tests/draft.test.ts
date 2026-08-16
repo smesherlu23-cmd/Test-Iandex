@@ -39,12 +39,35 @@ describe('пул карт', () => {
     expect(cardById('нет такой')).toBeNull();
   });
 
-  it('у всех карт пула есть телеграф', () => {
-    // ТЗ §6: атака без предупреждения нечестна.
+  it('телеграф есть у всех карт, кроме ловушки', () => {
+    // ТЗ §6: атака без предупреждения нечестна. Единственное исключение —
+    // «Ловушка», которая по таблице §8 и должна быть невидимой.
     for (const entry of CARD_POOL) {
-      expect(entry.card.telegraph).toBeGreaterThan(0);
       expect(entry.card.cost).toBeGreaterThan(0);
+      if (entry.card.id === 'trap') {
+        expect(entry.card.telegraph).toBe(0);
+        continue;
+      }
+      expect(entry.card.telegraph).toBeGreaterThan(0);
     }
+  });
+
+  it('в пуле весь стартовый набор ТЗ §8', () => {
+    // Двенадцатая карта — «Восстановление», это пустой слот, а не карта.
+    expect(CARD_POOL).toHaveLength(11);
+    expect(CARD_POOL.map((e) => e.card.id).sort()).toEqual([
+      'boss_charge',
+      'claw',
+      'collapse',
+      'fire_wave',
+      'fury',
+      'horror_moan',
+      'poison_zone',
+      'shard_volley',
+      'shatter_covers',
+      'summon',
+      'trap',
+    ]);
   });
 });
 

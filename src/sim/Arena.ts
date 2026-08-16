@@ -35,6 +35,20 @@ export class Arena {
     return x >= 0 && y >= 0 && x <= this.w && y <= this.h;
   }
 
+  /**
+   * Уничтожить укрытия, ближайшие к точке. «Разрушение укрытий» из ТЗ §8
+   * снимает защиту именно с того места, где стоит герой.
+   */
+  destroyNearest(x: number, y: number, count: number): Cover[] {
+    const ranked = [...this.covers].sort((a, b) => coverDist(a, x, y) - coverDist(b, x, y));
+    const doomed = ranked.slice(0, Math.max(0, count));
+    for (const cover of doomed) {
+      const i = this.covers.indexOf(cover);
+      if (i >= 0) this.covers.splice(i, 1);
+    }
+    return doomed;
+  }
+
   /** Укрытие, которое перекрывает круг, либо null. */
   coverAt(c: Circle): Cover | null {
     return this.coverAtXY(c.x, c.y, c.r);
@@ -51,4 +65,11 @@ export class Arena {
     }
     return null;
   }
+}
+
+/** Расстояние от точки до ближайшего края укрытия. */
+function coverDist(cover: Cover, x: number, y: number): number {
+  const dx = x - clamp(x, cover.x, cover.x + cover.w);
+  const dy = y - clamp(y, cover.y, cover.y + cover.h);
+  return Math.sqrt(dx * dx + dy * dy);
 }

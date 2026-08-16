@@ -10,15 +10,18 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "balance": "vite-node scripts/balance.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@types/node": "^26.2.0",
     "eslint": "^9.39.1",
     "globals": "^16.5.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.4",
     "vite": "^7.1.12",
+    "vite-node": "^6.0.0",
     "vitest": "^3.2.4"
   }
 }

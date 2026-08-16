@@ -37,6 +37,8 @@ export interface HeroOutcome {
   readonly attacked: boolean;
   readonly drankPotion: boolean;
   readonly actionChanged: boolean;
+  /** Герой ушёл рывком — повод для подписи «уклонился» (ТЗ §10). */
+  readonly dashed: boolean;
 }
 
 export interface HeroConfig {
@@ -73,7 +75,7 @@ interface Choice {
   y: number;
 }
 
-const IDLE: HeroOutcome = { attacked: false, drankPotion: false, actionChanged: false };
+const IDLE: HeroOutcome = { attacked: false, drankPotion: false, actionChanged: false, dashed: false };
 
 /**
  * Utility-ИИ: каждый кадр герой оценивает набор действий и берёт лучшее.
@@ -110,6 +112,11 @@ export class Hero {
   blockCd = 0;
   parryCd = 0;
   secondWindUsed = false;
+  /** Замедление: множитель скорости и его остаток, сек. */
+  slowFactor = 1;
+  slowFor = 0;
+  /** Остаток обездвиживания, сек. */
+  rootFor = 0;
   /** Опасность в точке героя на прошлом тике: парировать можно лишь замеченное. */
   private lastDanger = 0;
   private readonly familiarity: Readonly<Record<string, number>>;
@@ -129,6 +136,21 @@ export class Hero {
   /** Текущее время реакции на незнакомую атаку. */
   get reaction(): number {
     return this.panicking ? this.baseReaction * HERO_AI.PANIC_REACTION : this.baseReaction;
+  }
+
+  /** Скорость с учётом «Стона ужаса» и прочих замедлений. */
+  get currentSpeed(): number {
+    return this.slowFor > 0 ? this.speed * this.slowFactor : this.speed;
+  }
+
+  /** Наложить статус: замедление и/или обездвиживание. */
+  applyStatus(slow: number, slowFor: number, root: number): void {
+    if (slowFor > 0 && slow > 0) {
+      // Более сильное замедление перебивает более слабое.
+      if (slow < this.slowFactor || this.slowFor <= 0) this.slowFactor = slow;
+      this.slowFor = Math.max(this.slowFor, slowFor);
+    }
+    if (root > 0) this.rootFor = Math.max(this.rootFor, root);
   }
 
   has(ability: HeroAbility): boolean {
@@ -167,10 +189,15 @@ export class Hero {
     this.dashTime = Math.max(0, this.dashTime - dt);
     this.blockCd = Math.max(0, this.blockCd - dt);
     this.parryCd = Math.max(0, this.parryCd - dt);
+    this.slowFor = Math.max(0, this.slowFor - dt);
+    if (this.slowFor <= 0) this.slowFactor = 1;
+    this.rootFor = Math.max(0, this.rootFor - dt);
 
     const dangerHere = senses.danger.at(this.x, this.y);
     this.lastDanger = dangerHere;
-    this.calm = dangerHere <= HERO_AI.SAFE_DANGER ? this.calm + dt : 0;
+    // «Нет активной угрозы» (ТЗ §6) — это тишина вокруг, а не только под ногами:
+    // пить на бегу между двумя атаками герой не должен.
+    this.calm = this.quiet(senses, dangerHere) ? this.calm + dt : 0;
 
     if (this.strikeLock > 0) {
       // Замах уже начат: увернуться в этот момент герой не может.
@@ -190,10 +217,11 @@ export class Hero {
       this.calm = 0;
       this.vx = 0;
       this.vy = 0;
-      return { attacked: false, drankPotion: true, actionChanged };
+      return { attacked: false, drankPotion: true, actionChanged, dashed: false };
     }
 
     // Рывок: короткий разгон, чтобы вырваться из зоны, которую пешком не пройти.
+    let dashed = false;
     if (
       choice.kind === 'dodge' &&
       this.has('dash') &&
@@ -202,9 +230,16 @@ export class Hero {
     ) {
       this.dashTime = HERO_AI.DASH_TIME;
       this.dashCd = HERO_AI.DASH_CD;
+      dashed = true;
     }
 
-    this.moveTowards(choice.x, choice.y, dt, senses.arena);
+    if (this.rootFor > 0) {
+      // Обездвижен ловушкой: решение принято, но с места не сдвинуться.
+      this.vx = 0;
+      this.vy = 0;
+    } else {
+      this.moveTowards(choice.x, choice.y, dt, senses.arena);
+    }
 
     let attacked = false;
     if (choice.kind === 'attack' && this.attackCd <= 0 && this.inStrikeRange(senses)) {
@@ -213,7 +248,7 @@ export class Hero {
       this.strikeLock = HERO_AI.ATTACK_LOCK;
     }
 
-    return { attacked, drankPotion: false, actionChanged };
+    return { attacked, drankPotion: false, actionChanged, dashed };
   }
 
   /**
@@ -252,6 +287,19 @@ export class Hero {
     this.hp = 0;
     this.alive = false;
     return { amount: taken, parried: false, blocked, secondWind: false };
+  }
+
+  /** Затишье: рядом ничего не тлеет и ничего не летит. */
+  private quiet(senses: HeroSenses, dangerHere: number): boolean {
+    if (dangerHere > HERO_AI.SAFE_DANGER) return false;
+    if (this.incoming(senses) > 0) return false;
+    for (const dir of DIRS) {
+      const d = HERO_AI.LOOKAHEAD[1] ?? 2.6;
+      if (senses.danger.at(this.x + dir.dx * d, this.y + dir.dy * d) > HERO_AI.SAFE_DANGER) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private inStrikeRange(senses: HeroSenses): boolean {
@@ -445,7 +493,8 @@ export class Hero {
 
     let wantVx = 0;
     let wantVy = 0;
-    const top = this.dashTime > 0 ? this.speed * HERO_AI.DASH_SPEED : this.speed;
+    const base = this.currentSpeed;
+    const top = this.dashTime > 0 ? base * HERO_AI.DASH_SPEED : base;
     if (len > 0.05) {
       const want = Math.min(top, len / dt);
       wantVx = (dx / len) * want;

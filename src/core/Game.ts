@@ -1,5 +1,7 @@
 import type { PoolEntry } from '../draft/CardPool';
-import { Battle } from '../sim/Battle';
+import type { Battle } from '../sim/Battle';
+import type { PlaybackSpeed } from './BattlePlayer';
+import { BattlePlayer } from './BattlePlayer';
 import type { WaveResult } from './Run';
 import { Run } from './Run';
 
@@ -12,7 +14,8 @@ export type GamePhase = 'draft' | 'battle' | 'result' | 'over';
 export class Game {
   readonly run: Run;
   phase: GamePhase = 'draft';
-  battle: Battle | null = null;
+  /** Проигрыватель боя: скорость просмотра и замедление смерти. */
+  player: BattlePlayer | null = null;
   /** Итог последней волны — его показывает ResultScreen. */
   result: WaveResult | null = null;
 
@@ -20,20 +23,35 @@ export class Game {
     this.run = pool ? new Run(seed, pool) : new Run(seed);
   }
 
+  /** Бой текущей волны, пока он идёт. */
+  get battle(): Battle | null {
+    return this.player?.battle ?? null;
+  }
+
   /** Запустить бой по текущей расстановке. */
   startBattle(): void {
     if (this.phase !== 'draft') return;
-    this.battle = new Battle(this.run.battleConfig(), this.run.battleSeed());
+    this.player = new BattlePlayer(this.run.battleConfig(), this.run.battleSeed());
     this.phase = 'battle';
   }
 
-  /** Один шаг симуляции; вне боя ничего не делает. */
+  /** Один кадр просмотра; вне боя ничего не делает. */
   step(): void {
-    if (this.phase === 'battle') this.battle?.step();
+    if (this.phase === 'battle') this.player?.tick();
   }
 
+  setSpeed(speed: PlaybackSpeed): void {
+    this.player?.setSpeed(speed);
+  }
+
+  /** «Пропустить до конца»: смерть героя всё равно досматривается. */
+  skipBattle(): void {
+    this.player?.skip();
+  }
+
+  /** Бой досмотрен целиком — вместе с замедлением и паузой. */
   get battleFinished(): boolean {
-    return this.phase === 'battle' && (this.battle?.finished ?? false);
+    return this.phase === 'battle' && (this.player?.done ?? false);
   }
 
   /** Бой досмотрен: свести итог волны и решить, продолжается ли забег. */
@@ -48,7 +66,7 @@ export class Game {
   /** Итог волны прочитан: следующая волна и новый драфт. */
   nextWave(): void {
     if (this.phase !== 'result') return;
-    this.battle = null;
+    this.player = null;
     this.run.nextWave();
     this.phase = 'draft';
   }
