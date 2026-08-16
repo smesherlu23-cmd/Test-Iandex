@@ -1,7 +1,8 @@
-import { TUNING } from '../data/tuning';
+import { FX, TUNING } from '../data/tuning';
 import { Arena, BOSS_ANCHOR } from '../sim/Arena';
 import type { BattleState } from '../sim/Battle';
 import type { HazardShape } from '../sim/Hazard';
+import { Effects } from './Effects';
 
 const COLORS = {
   page: '#07070c',
@@ -40,11 +41,18 @@ export class BattleView {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
 
+  /** Слой подачи: частицы, вспышки, подписи, тряска. */
+  readonly effects = new Effects();
+
   private cssW = 0;
   private cssH = 0;
   private scale = 1;
   private ox = 0;
   private oy = 0;
+  /** Смещение тряски, пересчитывается каждый кадр. */
+  private shakeX = 0;
+  private shakeY = 0;
+  private shakePhase = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d');
@@ -81,11 +89,19 @@ export class BattleView {
     this.oy = (h - TUNING.ARENA.h * this.scale) / 2;
   }
 
-  draw(state: BattleState, fps: number): void {
+  draw(state: BattleState, fps: number, slowMotion = false): void {
     const c = this.ctx;
     c.fillStyle = COLORS.page;
     c.fillRect(0, 0, this.cssW, this.cssH);
 
+    // Тряска сдвигает только арену: HUD и подписи не должны дрожать.
+    this.shakePhase += 0.9;
+    const shake = this.effects.shake;
+    this.shakeX = Math.sin(this.shakePhase) * shake * this.scale;
+    this.shakeY = Math.cos(this.shakePhase * 1.7) * shake * this.scale;
+
+    c.save();
+    c.translate(this.shakeX, this.shakeY);
     this.drawArena();
     this.drawCovers(state);
     this.drawHazards(state);
@@ -93,7 +109,28 @@ export class BattleView {
     this.drawMinions(state);
     this.drawBoss(state);
     this.drawHero(state);
+    this.effects.draw(c, (x) => this.sx(x), (y) => this.sy(y), this.scale);
+    c.restore();
+
+    if (slowMotion) this.drawSlowMotionVignette();
     this.drawHud(state, fps);
+  }
+
+  /** Замедление перед смертью подсвечивается затемнением по краям. */
+  private drawSlowMotionVignette(): void {
+    const c = this.ctx;
+    const gradient = c.createRadialGradient(
+      this.cssW / 2,
+      this.cssH / 2,
+      Math.min(this.cssW, this.cssH) * 0.25,
+      this.cssW / 2,
+      this.cssH / 2,
+      Math.max(this.cssW, this.cssH) * 0.7,
+    );
+    gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0.55)');
+    c.fillStyle = gradient;
+    c.fillRect(0, 0, this.cssW, this.cssH);
   }
 
   /** Пустая арена под экраном драфта: боя ещё нет, а фон должен жить. */
@@ -167,6 +204,19 @@ export class BattleView {
       c.fillStyle = `rgba(${warning ? COLORS.telegraph : COLORS.active}, ${alpha})`;
       this.traceHazard(h.shape);
       c.fill();
+
+      // Первые мгновения активной фазы — резкая вспышка и обводка (ТЗ §10).
+      const sinceActive = state.time - h.activeFrom;
+      if (!warning && sinceActive < FX.FLASH_LIFE) {
+        const t = 1 - sinceActive / FX.FLASH_LIFE;
+        c.fillStyle = `rgba(255, 236, 214, ${0.5 * t})`;
+        this.traceHazard(h.shape);
+        c.fill();
+        c.strokeStyle = `rgba(255, 255, 255, ${0.8 * t})`;
+        c.lineWidth = 2;
+        this.traceHazard(h.shape);
+        c.stroke();
+      }
     }
   }
 

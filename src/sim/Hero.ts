@@ -37,6 +37,8 @@ export interface HeroOutcome {
   readonly attacked: boolean;
   readonly drankPotion: boolean;
   readonly actionChanged: boolean;
+  /** Герой ушёл рывком — повод для подписи «уклонился» (ТЗ §10). */
+  readonly dashed: boolean;
 }
 
 export interface HeroConfig {
@@ -73,7 +75,7 @@ interface Choice {
   y: number;
 }
 
-const IDLE: HeroOutcome = { attacked: false, drankPotion: false, actionChanged: false };
+const IDLE: HeroOutcome = { attacked: false, drankPotion: false, actionChanged: false, dashed: false };
 
 /**
  * Utility-ИИ: каждый кадр герой оценивает набор действий и берёт лучшее.
@@ -215,10 +217,11 @@ export class Hero {
       this.calm = 0;
       this.vx = 0;
       this.vy = 0;
-      return { attacked: false, drankPotion: true, actionChanged };
+      return { attacked: false, drankPotion: true, actionChanged, dashed: false };
     }
 
     // Рывок: короткий разгон, чтобы вырваться из зоны, которую пешком не пройти.
+    let dashed = false;
     if (
       choice.kind === 'dodge' &&
       this.has('dash') &&
@@ -227,6 +230,7 @@ export class Hero {
     ) {
       this.dashTime = HERO_AI.DASH_TIME;
       this.dashCd = HERO_AI.DASH_CD;
+      dashed = true;
     }
 
     if (this.rootFor > 0) {
@@ -244,7 +248,7 @@ export class Hero {
       this.strikeLock = HERO_AI.ATTACK_LOCK;
     }
 
-    return { attacked, drankPotion: false, actionChanged };
+    return { attacked, drankPotion: false, actionChanged, dashed };
   }
 
   /**

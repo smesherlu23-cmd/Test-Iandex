@@ -162,6 +162,7 @@ export class Battle implements BattleCtx {
 
     const outcome = this.hero.update(dt, this.senses());
     if (outcome.actionChanged) this.emit({ type: 'hero_action', kind: this.hero.action });
+    if (outcome.dashed) this.emit({ type: 'hero_dodge_dash' });
     if (outcome.drankPotion) {
       this.emit({ type: 'hero_potion', hp: this.hero.hp, left: this.hero.potions });
     }
