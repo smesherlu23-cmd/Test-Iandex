@@ -2,14 +2,28 @@ import { Loop } from './core/Loop';
 import { BattleView } from './render/BattleView';
 import type { BattleConfig } from './sim/Battle';
 import { Battle } from './sim/Battle';
-import { SHARD_VOLLEY } from './sim/Boss';
+import { COLLAPSE_PATTERN, POISON_ZONE, SHARD_VOLLEY } from './sim/Boss';
 
 const canvas = document.getElementById('game');
 if (!(canvas instanceof HTMLCanvasElement)) throw new Error('Канвас #game не найден');
 
-const P = SHARD_VOLLEY;
-/** Демо-таймлайн Этапа 1: пустые слоты дают энергию на оставшиеся паттерны. */
-const DEMO: BattleConfig = { timeline: [P, P, P, null, P, null, P, P] };
+/**
+ * Демо-таймлайн: облака подряд отжимают героя к краю, обвал ловит бегущего,
+ * веер показывает работу укрытий. Близко к самой опасной расстановке из
+ * доступных трёх паттернов.
+ */
+const DEMO: BattleConfig = {
+  timeline: [
+    POISON_ZONE,
+    POISON_ZONE,
+    POISON_ZONE,
+    COLLAPSE_PATTERN,
+    null,
+    POISON_ZONE,
+    SHARD_VOLLEY,
+    COLLAPSE_PATTERN,
+  ],
+};
 
 /** Сид фиксирован: демонстрационный бой воспроизводим от запуска к запуску. */
 let seed = 1337;

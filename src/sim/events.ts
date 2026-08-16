@@ -1,4 +1,5 @@
 import type { BattleOutcome } from './Battle';
+import type { HeroActionKind } from './Hero';
 
 /**
  * Тело события без времени: время проставляет Battle при записи в лог.
@@ -10,11 +11,15 @@ export type BattleEventBody =
   | { type: 'telegraph'; slot: number; card: string; duration: number }
   | { type: 'pattern_start'; slot: number; card: string }
   | { type: 'pattern_end'; slot: number; card: string }
+  | { type: 'hazard_spawn'; id: number; source: string; x: number; y: number }
   | { type: 'projectile_spawn'; id: number; source: string; x: number; y: number }
   | { type: 'projectile_blocked'; id: number; cover: number }
   | { type: 'projectile_expired'; id: number }
+  | { type: 'hero_action'; kind: HeroActionKind }
   | { type: 'hero_hit'; source: string; damage: number; hp: number }
+  | { type: 'hero_potion'; hp: number; left: number }
   | { type: 'hero_died'; x: number; y: number }
+  | { type: 'boss_hit'; damage: number; total: number }
   | { type: 'battle_end'; outcome: BattleOutcome; duration: number };
 
 export type BattleEvent = BattleEventBody & { t: number };
