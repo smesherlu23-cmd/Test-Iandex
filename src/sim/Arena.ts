@@ -1,6 +1,6 @@
 import { TUNING } from '../data/tuning';
 import type { Circle, Rect } from './Collision';
-import { circleRect } from './Collision';
+import { clamp } from './Collision';
 
 export interface Cover extends Rect {
   readonly id: number;
@@ -37,8 +37,17 @@ export class Arena {
 
   /** Укрытие, которое перекрывает круг, либо null. */
   coverAt(c: Circle): Cover | null {
+    return this.coverAtXY(c.x, c.y, c.r);
+  }
+
+  /** То же без создания объекта: вызывается десятки раз за кадр из ИИ героя. */
+  coverAtXY(x: number, y: number, r: number): Cover | null {
     for (const cover of this.covers) {
-      if (circleRect(c, cover)) return cover;
+      const nx = clamp(x, cover.x, cover.x + cover.w);
+      const ny = clamp(y, cover.y, cover.y + cover.h);
+      const dx = x - nx;
+      const dy = y - ny;
+      if (dx * dx + dy * dy <= r * r) return cover;
     }
     return null;
   }

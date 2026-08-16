@@ -1,6 +1,6 @@
 import { TUNING } from '../data/tuning';
 import type { BattleState } from '../sim/Battle';
-import { SHARD_VOLLEY_SHAPE } from '../sim/Boss';
+import type { HazardShape } from '../sim/Hazard';
 
 const COLORS = {
   page: '#07070c',
@@ -17,6 +17,14 @@ const COLORS = {
   active: '255, 138, 128',
   hud: '#8a8aa0',
   hudStrong: '#e8e8f2',
+} as const;
+
+const ACTION_LABELS = {
+  dodge: 'уклоняется',
+  attack: 'атакует',
+  hide: 'прячется',
+  potion: 'пьёт зелье',
+  wait: 'выжидает',
 } as const;
 
 /**
@@ -75,7 +83,7 @@ export class BattleView {
 
     this.drawArena();
     this.drawCovers(state);
-    this.drawTelegraph(state);
+    this.drawHazards(state);
     this.drawProjectiles(state);
     this.drawBoss(state);
     this.drawHero(state);
@@ -111,29 +119,41 @@ export class BattleView {
     }
   }
 
-  /** Заливка будущей зоны поражения с растущей непрозрачностью (ТЗ §10). */
-  private drawTelegraph(state: BattleState): void {
-    const boss = state.boss;
-    if (boss.phase !== 'telegraph' && boss.phase !== 'active') return;
-
-    const shape = SHARD_VOLLEY_SHAPE;
-    const telegraphing = boss.phase === 'telegraph';
-    const rgb = telegraphing ? COLORS.telegraph : COLORS.active;
-    const alpha = telegraphing ? 0.06 + boss.phaseProgress * 0.26 : 0.45;
-
+  /**
+   * Игрок видит ровно те зоны, которые паттерн объявил герою: заливка будущей
+   * зоны поражения с растущей непрозрачностью, затем резкая смена оттенка на
+   * активной фазе (ТЗ §10).
+   */
+  private drawHazards(state: BattleState): void {
     const c = this.ctx;
-    c.fillStyle = `rgba(${rgb}, ${alpha})`;
+    for (const h of state.hazards) {
+      const warning = state.time < h.activeFrom;
+      const lead = h.activeFrom - h.visibleAt;
+      const progress = lead > 0 ? (state.time - h.visibleAt) / lead : 1;
+      const alpha = warning ? 0.05 + Math.max(0, Math.min(1, progress)) * 0.3 : 0.42;
+
+      c.fillStyle = `rgba(${warning ? COLORS.telegraph : COLORS.active}, ${alpha})`;
+      this.traceHazard(h.shape);
+      c.fill();
+    }
+  }
+
+  private traceHazard(shape: HazardShape): void {
+    const c = this.ctx;
     c.beginPath();
-    c.moveTo(this.sx(boss.x), this.sy(boss.y));
-    c.arc(
-      this.sx(boss.x),
-      this.sy(boss.y),
-      shape.range * this.scale,
-      boss.aim - shape.spread / 2,
-      boss.aim + shape.spread / 2,
-    );
-    c.closePath();
-    c.fill();
+    if (shape.kind === 'circle') {
+      c.arc(this.sx(shape.x), this.sy(shape.y), shape.r * this.scale, 0, Math.PI * 2);
+      return;
+    }
+    // Луч рисуется прямоугольной полосой вдоль своего направления.
+    const half = (shape.width / 2) * this.scale;
+    const x = this.sx(shape.x);
+    const y = this.sy(shape.y);
+    c.save();
+    c.translate(x, y);
+    c.rotate(shape.angle);
+    c.rect(0, -half, shape.length * this.scale, half * 2);
+    c.restore();
   }
 
   private drawProjectiles(state: BattleState): void {
@@ -191,6 +211,8 @@ export class BattleView {
     c.fillText(`слот ${state.boss.slot + 1}/${TUNING.TIMELINE_SLOTS}`, pad, pad + 32);
     c.fillText(`энергия ${state.boss.energy}`, pad, pad + 48);
     c.fillText(`hp ${Math.ceil(state.hero.hp)}`, pad, pad + 64);
+    c.fillText(`зелья ${state.hero.potions}`, pad, pad + 80);
+    c.fillText(`герой: ${ACTION_LABELS[state.hero.action]}`, pad, pad + 96);
 
     if (!state.finished) return;
 
