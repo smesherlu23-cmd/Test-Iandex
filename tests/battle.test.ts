@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TUNING } from '../src/data/tuning';
 import { Arena } from '../src/sim/Arena';
-import { SHARDS } from '../src/sim/Boss';
+import { SHARDS } from '../src/draft/CardPool';
 import {
   circleCircle,
   circleInsideBounds,

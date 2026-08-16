@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { HERO_AI, TUNING } from '../src/data/tuning';
 import { Battle } from '../src/sim/Battle';
-import { COLLAPSE, POISON, SHARDS } from '../src/sim/Boss';
+import { COLLAPSE, POISON, SHARDS } from '../src/draft/CardPool';
 import { circleRect } from '../src/sim/Collision';
 import { DangerMap } from '../src/sim/DangerMap';
 import { hazardContains } from '../src/sim/Hazard';

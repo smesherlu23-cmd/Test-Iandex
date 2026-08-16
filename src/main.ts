@@ -1,42 +1,39 @@
+import { Game } from './core/Game';
 import { Loop } from './core/Loop';
 import { BattleView } from './render/BattleView';
-import type { BattleConfig } from './sim/Battle';
-import { Battle } from './sim/Battle';
-import { COLLAPSE_PATTERN, POISON_ZONE, SHARD_VOLLEY } from './sim/Boss';
+import { DraftScreen } from './ui/DraftScreen';
 
 const canvas = document.getElementById('game');
 if (!(canvas instanceof HTMLCanvasElement)) throw new Error('Канвас #game не найден');
 
-/**
- * Демо-таймлайн: облака подряд отжимают героя к краю, обвал ловит бегущего,
- * веер показывает работу укрытий. Близко к самой опасной расстановке из
- * доступных трёх паттернов.
- */
-const DEMO: BattleConfig = {
-  timeline: [
-    POISON_ZONE,
-    POISON_ZONE,
-    POISON_ZONE,
-    COLLAPSE_PATTERN,
-    null,
-    POISON_ZONE,
-    SHARD_VOLLEY,
-    COLLAPSE_PATTERN,
-  ],
-};
-
-/** Сид фиксирован: демонстрационный бой воспроизводим от запуска к запуску. */
-let seed = 1337;
-let battle = new Battle(DEMO, seed);
+// Сид забега берётся из часов: sim/ остаётся детерминированной, а каждый
+// забег получает свою последовательность драфтов. Забег целиком
+// воспроизводится по этому числу.
+const game = new Game(Date.now() >>> 0);
 
 const view = new BattleView(canvas);
+const draft = new DraftScreen({
+  onFight: () => {
+    game.startBattle();
+    draft.hide();
+  },
+});
+
 const loop = new Loop({
-  step: () => battle.step(),
-  render: (fps) => view.draw(battle.state, fps),
+  step: () => game.step(),
+  render: (fps) => {
+    const battle = game.battle;
+    if (battle) view.draw(battle.state, fps);
+    else view.drawIdle(fps);
+  },
 });
 
+// Бой закончился — тап возвращает в драфт следующей волны.
 canvas.addEventListener('pointerdown', () => {
-  if (battle.finished) battle = new Battle(DEMO, ++seed);
+  if (!game.battleFinished) return;
+  game.nextWave();
+  draft.show(game.run, game.lastOutcome);
 });
 
+draft.show(game.run);
 loop.start();

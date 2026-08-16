@@ -1,6 +1,6 @@
 import type { BattleConfig } from '../src/sim/Battle';
 import { Battle } from '../src/sim/Battle';
-import { COLLAPSE_PATTERN, POISON_ZONE, SHARD_VOLLEY } from '../src/sim/Boss';
+import { COLLAPSE_PATTERN, POISON_ZONE, SHARD_VOLLEY } from '../src/draft/CardPool';
 
 /** Потолок на случай, если бой перестанет завершаться: тест должен падать, а не висеть. */
 const TICK_GUARD = 10_000;
